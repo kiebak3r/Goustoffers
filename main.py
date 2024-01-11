@@ -48,56 +48,73 @@ class Gousto:
         self.confirmLoginBtn = '[data-testing="loginFormSubmit"]'
         self.upcomingDeliveries = '[data-testing="myGoustoNextBoxHelpCTA"]'
         self.pendingOrder = '[data-testing="pendingOrder"]'
+        self.accountSettings = 'Subscription Settings'
+        self.pauseSubscription = '[data-testing="pause-subscription-cta"]'
+        self.confirmPauseSubscription = '[data-testing="continue-to-pause-link"]'
         self.prices = []
         self.email_needed = False
 
-    async def check_remaining_discount(self):
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=False)
-            c = await browser.new_context()
-            page = await c.new_page()
+    async def login(self, page) -> None:
+        await page.goto(self.url)
+        await page.click(self.loginBtn)
+        await page.fill(self.emailField, self.userEmail)
+        await page.fill(self.emailPassField, self.userPass)
+        await page.wait_for_timeout(self.timeout)
+        await page.click(self.confirmLoginBtn)
 
-            await page.goto(self.url)
-            await page.click(self.loginBtn)
-            await page.fill(self.emailField, self.userEmail)
-            await page.fill(self.emailPassField, self.userPass)
-            await page.wait_for_timeout(self.timeout)
-            await page.click(self.confirmLoginBtn)
-            await page.click(self.upcomingDeliveries)
-            await page.wait_for_selector(self.pendingOrder)
+    async def check_remaining_discount(self, page) -> None:
+        await self.login(page)
+        await page.click(self.upcomingDeliveries)
+        await page.wait_for_selector(self.pendingOrder)
 
-            for price_element in await page.query_selector_all(self.pendingOrder):
-                order_info = await price_element.inner_text()
-                price = [p.strip().replace('£', '') for p in order_info.split('\n') if '£' in p]
-                if price:
-                    last_price = float(price[-1])
-                    self.prices.append(last_price)
+        for price_element in await page.query_selector_all(self.pendingOrder):
+            order_info = await price_element.inner_text()
+            price = [p.strip().replace('£', '') for p in order_info.split('\n') if '£' in p]
+            if price:
+                last_price = float(price[-1])
+                self.prices.append(last_price)
 
-            if any(price > 39 for price in self.prices) and not self.email_needed:
-                self.email_needed = True
+        if any(price > 39 for price in self.prices) and not self.email_needed:
+            self.email_needed = True
 
-            await browser.close()
+    async def cancel_membership(self, page) -> bool:
+        await self.login(page)
+        await page.get_by_text(self.accountSettings).nth(1).click()
+        await page.click(self.pauseSubscription)
+        await page.click(self.confirmPauseSubscription)
+        return True
 
 
 if __name__ == '__main__':
     config = configparser.ConfigParser()
     config.read('config.ini')
 
-    gousto = Gousto()
-    email = EmailAccount()
-    new_email = email.create_inbox()
+    async def main():
+        gousto = Gousto()
+        email = EmailAccount()
+        new_email = email.create_inbox()
 
-    MSG = f"""
-    Hello!
-    
-    Your Gousto discount is expiring soon, You should create a new account.
-    We have cancelled the membership for the pre existing account.
-    
-    You can use the following email to sign up for a new account if you wish:
-    Email: {new_email[0]}
-    """
+        email_body = f"""
+        Hello!
 
-    asyncio.run(gousto.check_remaining_discount())
-    if gousto.email_needed:
-        EmailAccount(MSG).send_email()
+        Your Gousto discount is expiring soon, You should create a new account.
+        We have cancelled the membership for the pre existing account.
+
+        You can use the following email to sign up for a new account if you wish:
+        Email: {new_email[0]}
+        """
+
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=False)
+            context = await browser.new_context()
+            page = await context.new_page()
+
+            await gousto.check_remaining_discount(page)
+            if gousto.email_needed:
+                if await gousto.cancel_membership(page):
+                    EmailAccount(email_body).send_email()
+            await browser.close()
+
+    asyncio.run(main())
+
 
