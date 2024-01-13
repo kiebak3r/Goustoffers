@@ -74,7 +74,7 @@ class Gousto:
                 last_price = float(price[-1])
                 self.prices.append(last_price)
 
-        if any(price > 45 for price in self.prices) and not self.email_needed:
+        if any(price > 44 for price in self.prices) and not self.email_needed:
             self.email_needed = True
 
     async def cancel_membership(self, page) -> bool:
